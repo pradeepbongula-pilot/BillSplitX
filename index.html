@@ -287,13 +287,13 @@
             `;
         }
 
-        // Actions
-        function generateId() {
+        // Actions - Make globally accessible
+        window.generateId = function() {
             state.groupInput = Math.random().toString(36).substring(2, 8).toUpperCase();
             render();
         }
 
-        function joinGroup() {
+        window.joinGroup = function() {
             if (state.groupInput.trim()) {
                 state.groupId = state.groupInput.trim();
                 state.view = 'loading';
@@ -303,7 +303,7 @@
             }
         }
 
-        function leaveGroup() {
+        window.leaveGroup = function() {
             state = {
                 groupId: '',
                 groupInput: '',
@@ -342,6 +342,7 @@
             navigator.clipboard.writeText(state.groupId);
             alert('Copied!');
         }
+        window.copyGroupId = copyGroupId;
 
         function toggleAddFriend() {
             state.showAddFriend = !state.showAddFriend;
@@ -350,6 +351,7 @@
                 setTimeout(() => document.getElementById('newFriendInput').focus(), 100);
             }
         }
+        window.toggleAddFriend = toggleAddFriend;
 
         function addFriend() {
             const input = document.getElementById('newFriendInput');
@@ -362,6 +364,7 @@
                 state.showAddFriend = false;
             }
         }
+        window.addFriend = addFriend;
 
         function removeFriend(id) {
             db.ref(`groups/${state.groupId}/friends/${id}`).remove();
@@ -371,6 +374,7 @@
                 }
             });
         }
+        window.removeFriend = removeFriend;
 
         function toggleAddExpense() {
             state.showAddExpense = !state.showAddExpense;
@@ -384,6 +388,7 @@
             };
             render();
         }
+        window.toggleAddExpense = toggleAddExpense;
 
         function updateSplitType() {
             const splitType = document.getElementById('splitType').value;
@@ -406,6 +411,7 @@
             
             updateParticipantSplit();
         }
+        window.updateSplitType = updateSplitType;
 
         function updateParticipantSplit() {
             const splitType = document.getElementById('splitType')?.value || 'equal';
@@ -447,6 +453,7 @@
                 }
             }
         }
+        window.updateParticipantSplit = updateParticipantSplit;
 
         function selectAllParticipants() {
             const checks = document.querySelectorAll('.participant-check');
@@ -458,6 +465,7 @@
             
             updateParticipantSplit();
         }
+        window.selectAllParticipants = selectAllParticipants;
 
         function addExpense() {
             const desc = document.getElementById('expDesc').value.trim();
@@ -520,15 +528,18 @@
             
             state.showAddExpense = false;
         }
+        window.addExpense = addExpense;
 
         function removeExpense(id) {
             db.ref(`groups/${state.groupId}/expenses/${id}`).remove();
         }
+        window.removeExpense = removeExpense;
 
         function toggleSettlement() {
             state.showSettlement = !state.showSettlement;
             render();
         }
+        window.toggleSettlement = toggleSettlement;
 
         // Calculations
         function calculateBalances() {
