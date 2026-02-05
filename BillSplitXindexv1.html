@@ -1,3 +1,19 @@
+// Prevent React-mismatch crash when something else modifies DOM
+(function() {
+    const originalRemoveChild = Node.prototype.removeChild;
+    Node.prototype.removeChild = function(child) {
+        try {
+            if (this && child && !this.contains(child)) {
+                console.warn("[Defensive] Blocked invalid removeChild");
+                return child;
+            }
+            return originalRemoveChild.apply(this, arguments);
+        } catch (e) {
+            console.warn("[Defensive] removeChild error prevented", e);
+            return child;
+        }
+    };
+})();
 <!DOCTYPE html>
 <html lang="en">
 <head>
