@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bill Splitter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body>
+    <div id="app"></div>
+
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+
+    <script>
+        // Initialize Firebase
+        firebase.initializeApp({
+            apiKey: "AIzaSyANplgQXh_UMoU29BOsMU1qihpLZaNz8D0",
+            authDomain: "billsplitx.firebaseapp.com",
+            databaseURL: "https://billsplitx-default-rtdb.firebaseio.com",
+            projectId: "billsplitx",
+            storageBucket: "billsplitx.firebasestorage.app",
+            messagingSenderId: "970250474982",
+            appId: "1:970250474982:web:860881a78820a315127227"
+        });
+
+        const db = firebase.database();
+        
+        // State
+        let state = {
+            groupId: '',
+            groupInput: '',
+            view: 'input', // 'input', 'loading', 'main'
+            friends: [],
+            expenses: [],
+            showAddFriend: false,
+            showAddExpense: false,
+            showSettlement: false,
+            newFriendName: '',
+            expenseForm: { desc: '', amount: '', payer: '', participants: new Set() }
+        };
+
+        // Render function
+        function render() {
+            const app = document.getElementById('app');
+            
+            if (state.view === 'input') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 flex items-center justify-center">
+                        <div class="bg-white rounded-lg shadow-xl p-8 max-w-md w-full">
+                            <div class="text-center mb-6">
+                                <h1 class="text-3xl font-bold text-indigo-600 mb-2">💰 Bill Splitter</h1>
+                                <p class="text-gray-600">Create or join a group</p>
+                            </div>
+                            <input id="groupInput" type="text" value="${state.groupInput}" 
+                                placeholder="Enter Group ID" maxlength="10"
+                                class="w-full px-4 py-3 border rounded-lg mb-3 text-center text-lg font-mono uppercase">
+                            <button onclick="joinGroup()" class="w-full bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 mb-3 font-semibold">
+                                Join / Create Group
+                            </button>
+                            <button onclick="generateId()" class="w-full bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 font-semibold">
+                                + Generate New ID
+                            </button>
+                        </div>
+                    </div>
+                `;
+                
+                document.getElementById('groupInput').addEventListener('input', (e) => {
+                    state.groupInput = e.target.value.toUpperCase();
+                });
+                
+                document.getElementById('groupInput').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') joinGroup();
+                });
+                
+            } else if (state.view === 'loading') {
+                app.innerHTML = `
+                    <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4 flex items-center justify-center">
+                        <div class="text-center">
+                            <div class="animate-spin rounded-full h-16 w-16 border-b-4 border-indigo-600 mx-auto mb-4"></div>
+                            <p class="text-gray-600">Loading: ${state.groupId}</p>
+                            <button onclick="leaveGroup()" class="mt-4 text-sm text-indigo-600 hover:text-indigo-800">Cancel</button>
+                        </div>
+                    </div>
+                `;
+                
+            } else {
+                renderMainApp();
+            }
+        }
+
+        function renderMainApp() {
+            const balances = calculateBalances();
+            const settlements = calculateSettlements(balances);
+            
+            document.getElementById('app').innerHTML = `
+                <div class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+                    <div class="max-w-4xl mx-auto">
+                        <!-- Header -->
+                        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div class="flex justify-between mb-4">
+                                <h1 class="text-3xl font-bold text-indigo-600">💰 Bill Splitter</h1>
+                                <button onclick="leaveGroup()" class="text-red-600 text-sm hover:text-red-700">Leave</button>
+                            </div>
+                            <div class="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                                <div class="flex justify-between items-center">
+                                    <div>
+                                        <p class="text-sm text-indigo-700">Group ID</p>
+                                        <p class="text-2xl font-mono font-bold text-indigo-900">${state.groupId}</p>
+                                    </div>
+                                    <button onclick="copyGroupId()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                                        📋 Copy
+                                    </button>
+                                </div>
+                                <p class="text-sm text-indigo-600 mt-2">📤 Share this ID with friends</p>
+                            </div>
+                        </div>
+
+                        <!-- Friends -->
+                        <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                            <div class="flex justify-between mb-4">
+                                <h2 class="text-xl font-semibold">👥 Friends (${state.friends.length})</h2>
+                                <button onclick="toggleAddFriend()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">+</button>
+                            </div>
+                            ${state.showAddFriend ? `
+                                <div class="mb-4 flex gap-2">
+                                    <input id="newFriendInput" type="text" placeholder="Name" 
+                                        class="flex-1 px-4 py-2 border rounded-lg">
+                                    <button onclick="addFriend()" class="bg-green-600 text-white px-4 py-2 rounded-lg">✓</button>
+                                    <button onclick="toggleAddFriend()" class="bg-gray-400 text-white px-4 py-2 rounded-lg">✕</button>
+                                </div>
+                            ` : ''}
+                            <div class="space-y-2">
+                                ${state.friends.map(f => {
+                                    const bal = balances[f.id] || 0;
+                                    return `
+                                        <div class="flex justify-between bg-gray-50 p-3 rounded-lg">
+                                            <div>
+                                                <div class="font-medium">${f.name}</div>
+                                                <div class="text-sm ${bal > 0.01 ? 'text-green-600' : bal < -0.01 ? 'text-red-600' : 'text-gray-600'}">
+                                                    $${Math.abs(bal).toFixed(2)} ${bal > 0.01 ? '(gets back)' : bal < -0.01 ? '(owes)' : '(settled)'}
+                                                </div>
+                                            </div>
+                                            <button onclick="removeFriend('${f.id}')" class="text-red-500 hover:text-red-700">✕</button>
+                                        </div>
+                                    `;
+                                }).join('')}
+                                ${state.friends.length === 0 ? '<p class="text-gray-500 text-center py-8">Add friends to start!</p>' : ''}
+                            </div>
+                        </div>
+
+                        <!-- Expenses -->
+                        ${state.friends.length > 0 ? `
+                            <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
+                                <div class="flex justify-between mb-4">
+                                    <h2 class="text-xl font-semibold">💸 Expenses (${state.expenses.length})</h2>
+                                    <button onclick="toggleAddExpense()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">+</button>
+                                </div>
+                                ${state.showAddExpense ? `
+                                    <div class="mb-4 bg-gray-50 p-4 rounded-lg">
+                                        <input id="expDesc" type="text" placeholder="Description" class="w-full px-4 py-2 border rounded-lg mb-2">
+                                        <input id="expAmount" type="number" step="0.01" placeholder="Amount" class="w-full px-4 py-2 border rounded-lg mb-2">
+                                        <select id="expPayer" class="w-full px-4 py-2 border rounded-lg mb-2">
+                                            <option value="">Who paid?</option>
+                                            ${state.friends.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
+                                        </select>
+                                        <div class="mb-2">
+                                            <p class="text-sm mb-1">Split between:</p>
+                                            <div id="participants" class="grid grid-cols-2 gap-1">
+                                                ${state.friends.map(f => `
+                                                    <label class="flex items-center gap-1">
+                                                        <input type="checkbox" value="${f.id}" class="participant-check">
+                                                        <span class="text-sm">${f.name}</span>
+                                                    </label>
+                                                `).join('')}
+                                            </div>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button onclick="addExpense()" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg">Add</button>
+                                            <button onclick="toggleAddExpense()" class="bg-gray-400 text-white px-4 py-2 rounded-lg">Cancel</button>
+                                        </div>
+                                    </div>
+                                ` : ''}
+                                <div class="space-y-2">
+                                    ${state.expenses.slice().reverse().map(exp => `
+                                        <div class="bg-gray-50 p-3 rounded-lg">
+                                            <div class="flex justify-between">
+                                                <div>
+                                                    <div class="font-semibold">${exp.description}</div>
+                                                    <div class="text-sm text-gray-600">${getFriendName(exp.payerId)} paid $${exp.amount.toFixed(2)}</div>
+                                                    <div class="text-xs text-gray-500">$${(exp.amount / exp.participantIds.length).toFixed(2)}/person</div>
+                                                </div>
+                                                <button onclick="removeExpense('${exp.id}')" class="text-red-500 hover:text-red-700">✕</button>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                    ${state.expenses.length === 0 ? '<p class="text-gray-500 text-center py-8">No expenses yet.</p>' : ''}
+                                </div>
+                            </div>
+                        ` : ''}
+
+                        <!-- Settlement -->
+                        ${state.friends.length > 0 && state.expenses.length > 0 ? `
+                            <div class="bg-white rounded-lg shadow-lg p-6">
+                                <div class="flex justify-between mb-4">
+                                    <h2 class="text-xl font-semibold">Settle Up</h2>
+                                    <button onclick="toggleSettlement()" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700">
+                                        ${state.showSettlement ? 'Hide' : 'Show'}
+                                    </button>
+                                </div>
+                                ${state.showSettlement ? `
+                                    <div class="bg-green-50 p-4 rounded-lg">
+                                        ${settlements.length === 0 ? '<p class="text-green-700">All settled! 🎉</p>' : `
+                                            <div class="space-y-2">
+                                                ${settlements.map(s => `
+                                                    <div class="bg-white p-3 rounded border-l-4 border-green-500">
+                                                        <p>${getFriendName(s.from)} → ${getFriendName(s.to)}</p>
+                                                        <p class="text-2xl font-bold text-green-600">$${s.amount.toFixed(2)}</p>
+                                                    </div>
+                                                `).join('')}
+                                            </div>
+                                        `}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Actions
+        function generateId() {
+            state.groupInput = Math.random().toString(36).substring(2, 8).toUpperCase();
+            render();
+        }
+
+        function joinGroup() {
+            if (state.groupInput.trim()) {
+                state.groupId = state.groupInput.trim();
+                state.view = 'loading';
+                localStorage.setItem('billSplitterGroupId', state.groupId);
+                render();
+                setupListeners();
+            }
+        }
+
+        function leaveGroup() {
+            state = {
+                groupId: '',
+                groupInput: '',
+                view: 'input',
+                friends: [],
+                expenses: [],
+                showAddFriend: false,
+                showAddExpense: false,
+                showSettlement: false,
+                newFriendName: '',
+                expenseForm: { desc: '', amount: '', payer: '', participants: new Set() }
+            };
+            localStorage.removeItem('billSplitterGroupId');
+            render();
+        }
+
+        function setupListeners() {
+            const friendsRef = db.ref(`groups/${state.groupId}/friends`);
+            const expensesRef = db.ref(`groups/${state.groupId}/expenses`);
+
+            friendsRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                state.friends = data ? Object.keys(data).map(key => ({ id: key, ...data[key] })) : [];
+                state.view = 'main';
+                render();
+            });
+
+            expensesRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                state.expenses = data ? Object.keys(data).map(key => ({ id: key, ...data[key] })) : [];
+                if (state.view === 'main') render();
+            });
+        }
+
+        function copyGroupId() {
+            navigator.clipboard.writeText(state.groupId);
+            alert('Copied!');
+        }
+
+        function toggleAddFriend() {
+            state.showAddFriend = !state.showAddFriend;
+            render();
+            if (state.showAddFriend) {
+                setTimeout(() => document.getElementById('newFriendInput').focus(), 100);
+            }
+        }
+
+        function addFriend() {
+            const input = document.getElementById('newFriendInput');
+            const name = input.value.trim();
+            if (name) {
+                db.ref(`groups/${state.groupId}/friends`).push().set({
+                    name: name,
+                    createdAt: Date.now()
+                });
+                state.showAddFriend = false;
+            }
+        }
+
+        function removeFriend(id) {
+            db.ref(`groups/${state.groupId}/friends/${id}`).remove();
+            state.expenses.forEach(exp => {
+                if (exp.payerId === id || exp.participantIds.includes(id)) {
+                    db.ref(`groups/${state.groupId}/expenses/${exp.id}`).remove();
+                }
+            });
+        }
+
+        function toggleAddExpense() {
+            state.showAddExpense = !state.showAddExpense;
+            render();
+        }
+
+        function addExpense() {
+            const desc = document.getElementById('expDesc').value.trim();
+            const amount = parseFloat(document.getElementById('expAmount').value);
+            const payer = document.getElementById('expPayer').value;
+            const checks = document.querySelectorAll('.participant-check:checked');
+            const participants = Array.from(checks).map(c => c.value);
+
+            if (desc && amount && payer && participants.length > 0) {
+                db.ref(`groups/${state.groupId}/expenses`).push().set({
+                    description: desc,
+                    amount: amount,
+                    payerId: payer,
+                    participantIds: participants,
+                    date: Date.now()
+                });
+                state.showAddExpense = false;
+            }
+        }
+
+        function removeExpense(id) {
+            db.ref(`groups/${state.groupId}/expenses/${id}`).remove();
+        }
+
+        function toggleSettlement() {
+            state.showSettlement = !state.showSettlement;
+            render();
+        }
+
+        // Calculations
+        function calculateBalances() {
+            const balances = {};
+            state.friends.forEach(f => balances[f.id] = 0);
+            state.expenses.forEach(exp => {
+                const share = exp.amount / exp.participantIds.length;
+                balances[exp.payerId] = (balances[exp.payerId] || 0) + exp.amount;
+                exp.participantIds.forEach(id => {
+                    balances[id] = (balances[id] || 0) - share;
+                });
+            });
+            return balances;
+        }
+
+        function calculateSettlements(balances) {
+            const settlements = [];
+            let debtors = [], creditors = [];
+
+            Object.entries(balances).forEach(([id, bal]) => {
+                if (bal < -0.01) debtors.push({ id, amount: -bal });
+                else if (bal > 0.01) creditors.push({ id, amount: bal });
+            });
+
+            debtors.sort((a, b) => b.amount - a.amount);
+            creditors.sort((a, b) => b.amount - a.amount);
+
+            let i = 0, j = 0;
+            while (i < debtors.length && j < creditors.length) {
+                const amt = Math.min(debtors[i].amount, creditors[j].amount);
+                settlements.push({ from: debtors[i].id, to: creditors[j].id, amount: amt });
+                debtors[i].amount -= amt;
+                creditors[j].amount -= amt;
+                if (debtors[i].amount < 0.01) i++;
+                if (creditors[j].amount < 0.01) j++;
+            }
+            return settlements;
+        }
+
+        function getFriendName(id) {
+            const friend = state.friends.find(f => f.id === id);
+            return friend ? friend.name : 'Unknown';
+        }
+
+        // Initialize
+        const saved = localStorage.getItem('billSplitterGroupId');
+        if (saved) {
+            state.groupInput = saved;
+            joinGroup();
+        } else {
+            render();
+        }
+    </script>
+</body>
+</html>
