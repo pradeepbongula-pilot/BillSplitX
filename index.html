@@ -13,6 +13,19 @@
     <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 
     <script>
+        // Wait for Firebase to load
+        function initWhenReady() {
+            if (typeof firebase === 'undefined') {
+                console.log('Waiting for Firebase...');
+                setTimeout(initWhenReady, 100);
+                return;
+            }
+            
+            console.log('Firebase loaded!');
+            initApp();
+        }
+
+        function initApp() {
         // Initialize Firebase
         firebase.initializeApp({
             apiKey: "AIzaSyANplgQXh_UMoU29BOsMU1qihpLZaNz8D0",
@@ -37,7 +50,14 @@
             showAddExpense: false,
             showSettlement: false,
             newFriendName: '',
-            expenseForm: { desc: '', amount: '', payer: '', participants: new Set() }
+            expenseForm: { 
+                desc: '', 
+                amount: '', 
+                payer: '', 
+                participants: new Set(),
+                splitType: 'equal', // 'equal', 'percentage', 'custom'
+                splits: {} // { friendId: amount/percentage }
+            }
         };
 
         // Render function
@@ -130,22 +150,22 @@
                                     <button onclick="toggleAddFriend()" class="bg-gray-400 text-white px-4 py-2 rounded-lg">✕</button>
                                 </div>
                             ` : ''}
-                            <div class="space-y-2">
+                            <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                                 ${state.friends.map(f => {
                                     const bal = balances[f.id] || 0;
                                     return `
-                                        <div class="flex justify-between bg-gray-50 p-3 rounded-lg">
-                                            <div>
-                                                <div class="font-medium">${f.name}</div>
-                                                <div class="text-sm ${bal > 0.01 ? 'text-green-600' : bal < -0.01 ? 'text-red-600' : 'text-gray-600'}">
-                                                    $${Math.abs(bal).toFixed(2)} ${bal > 0.01 ? '(gets back)' : bal < -0.01 ? '(owes)' : '(settled)'}
+                                        <div class="flex justify-between items-center bg-gray-50 p-2 rounded-lg text-sm">
+                                            <div class="flex-1 min-w-0">
+                                                <div class="font-medium truncate">${f.name}</div>
+                                                <div class="text-xs ${bal > 0.01 ? 'text-green-600' : bal < -0.01 ? 'text-red-600' : 'text-gray-600'}">
+                                                    $${Math.abs(bal).toFixed(2)}
                                                 </div>
                                             </div>
-                                            <button onclick="removeFriend('${f.id}')" class="text-red-500 hover:text-red-700">✕</button>
+                                            <button onclick="removeFriend('${f.id}')" class="text-red-500 hover:text-red-700 ml-1">✕</button>
                                         </div>
                                     `;
                                 }).join('')}
-                                ${state.friends.length === 0 ? '<p class="text-gray-500 text-center py-8">Add friends to start!</p>' : ''}
+                                ${state.friends.length === 0 ? '<p class="col-span-full text-gray-500 text-center py-8">Add friends to start!</p>' : ''}
                             </div>
                         </div>
 
@@ -164,17 +184,43 @@
                                             <option value="">Who paid?</option>
                                             ${state.friends.map(f => `<option value="${f.id}">${f.name}</option>`).join('')}
                                         </select>
+                                        
                                         <div class="mb-2">
-                                            <p class="text-sm mb-1">Split between:</p>
-                                            <div id="participants" class="grid grid-cols-2 gap-1">
+                                            <label class="text-sm font-medium mb-1 block">Split Type:</label>
+                                            <select id="splitType" onchange="updateSplitType()" class="w-full px-4 py-2 border rounded-lg mb-2">
+                                                <option value="equal">Equal Split</option>
+                                                <option value="percentage">Percentage Split</option>
+                                                <option value="custom">Custom Amounts</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="mb-2">
+                                            <div class="flex justify-between items-center mb-1">
+                                                <p class="text-sm font-medium">Split between:</p>
+                                                <button onclick="selectAllParticipants()" type="button" class="text-xs text-indigo-600 hover:text-indigo-800">
+                                                    Select All
+                                                </button>
+                                            </div>
+                                            <div id="participants" class="border rounded-lg p-2 max-h-48 overflow-y-auto">
                                                 ${state.friends.map(f => `
-                                                    <label class="flex items-center gap-1">
-                                                        <input type="checkbox" value="${f.id}" class="participant-check">
-                                                        <span class="text-sm">${f.name}</span>
-                                                    </label>
+                                                    <div class="flex items-center gap-2 mb-2">
+                                                        <label class="flex items-center gap-1 flex-1">
+                                                            <input type="checkbox" value="${f.id}" class="participant-check" onchange="updateParticipantSplit()">
+                                                            <span class="text-sm">${f.name}</span>
+                                                        </label>
+                                                        <input type="number" 
+                                                            step="0.01" 
+                                                            id="split-${f.id}" 
+                                                            placeholder="${state.expenseForm.splitType === 'percentage' ? '%' : '$'}" 
+                                                            class="split-input w-20 px-2 py-1 border rounded text-sm" 
+                                                            oninput="updateParticipantSplit()"
+                                                            style="display: none;">
+                                                    </div>
                                                 `).join('')}
                                             </div>
+                                            <div id="splitWarning" class="text-xs text-amber-600 mt-1" style="display: none;"></div>
                                         </div>
+
                                         <div class="flex gap-2">
                                             <button onclick="addExpense()" class="flex-1 bg-green-600 text-white px-4 py-2 rounded-lg">Add</button>
                                             <button onclick="toggleAddExpense()" class="bg-gray-400 text-white px-4 py-2 rounded-lg">Cancel</button>
@@ -182,18 +228,30 @@
                                     </div>
                                 ` : ''}
                                 <div class="space-y-2">
-                                    ${state.expenses.slice().reverse().map(exp => `
+                                    ${state.expenses.slice().reverse().map(exp => {
+                                        let splitInfo = '';
+                                        if (exp.splitType === 'percentage' || exp.splitType === 'custom') {
+                                            splitInfo = exp.participantIds.map(id => {
+                                                const amount = exp.splits?.[id] || (exp.amount / exp.participantIds.length);
+                                                return `${getFriendName(id)}: $${amount.toFixed(2)}`;
+                                            }).join(', ');
+                                        } else {
+                                            splitInfo = `$${(exp.amount / exp.participantIds.length).toFixed(2)}/person`;
+                                        }
+                                        
+                                        return `
                                         <div class="bg-gray-50 p-3 rounded-lg">
                                             <div class="flex justify-between">
                                                 <div>
                                                     <div class="font-semibold">${exp.description}</div>
                                                     <div class="text-sm text-gray-600">${getFriendName(exp.payerId)} paid $${exp.amount.toFixed(2)}</div>
-                                                    <div class="text-xs text-gray-500">$${(exp.amount / exp.participantIds.length).toFixed(2)}/person</div>
+                                                    <div class="text-xs text-gray-500">${splitInfo}</div>
                                                 </div>
                                                 <button onclick="removeExpense('${exp.id}')" class="text-red-500 hover:text-red-700">✕</button>
                                             </div>
                                         </div>
-                                    `).join('')}
+                                    `;
+                                    }).join('')}
                                     ${state.expenses.length === 0 ? '<p class="text-gray-500 text-center py-8">No expenses yet.</p>' : ''}
                                 </div>
                             </div>
@@ -316,7 +374,89 @@
 
         function toggleAddExpense() {
             state.showAddExpense = !state.showAddExpense;
+            state.expenseForm = { 
+                desc: '', 
+                amount: '', 
+                payer: '', 
+                participants: new Set(),
+                splitType: 'equal',
+                splits: {}
+            };
             render();
+        }
+
+        function updateSplitType() {
+            const splitType = document.getElementById('splitType').value;
+            state.expenseForm.splitType = splitType;
+            
+            const splitInputs = document.querySelectorAll('.split-input');
+            const checks = document.querySelectorAll('.participant-check:checked');
+            
+            if (splitType === 'equal') {
+                splitInputs.forEach(input => input.style.display = 'none');
+            } else {
+                checks.forEach(check => {
+                    const input = document.getElementById('split-' + check.value);
+                    if (input) {
+                        input.style.display = 'block';
+                        input.placeholder = splitType === 'percentage' ? '%' : '$';
+                    }
+                });
+            }
+            
+            updateParticipantSplit();
+        }
+
+        function updateParticipantSplit() {
+            const splitType = document.getElementById('splitType')?.value || 'equal';
+            const checks = document.querySelectorAll('.participant-check:checked');
+            const amount = parseFloat(document.getElementById('expAmount')?.value || 0);
+            const warning = document.getElementById('splitWarning');
+            
+            if (splitType === 'equal') {
+                if (warning) warning.style.display = 'none';
+                return;
+            }
+            
+            let total = 0;
+            checks.forEach(check => {
+                const input = document.getElementById('split-' + check.value);
+                if (input) {
+                    const val = parseFloat(input.value || 0);
+                    total += val;
+                }
+            });
+            
+            if (splitType === 'percentage') {
+                if (warning) {
+                    if (Math.abs(total - 100) > 0.01 && checks.length > 0) {
+                        warning.textContent = `Total: ${total.toFixed(1)}% (should be 100%)`;
+                        warning.style.display = 'block';
+                    } else {
+                        warning.style.display = 'none';
+                    }
+                }
+            } else if (splitType === 'custom') {
+                if (warning) {
+                    if (Math.abs(total - amount) > 0.01 && checks.length > 0) {
+                        warning.textContent = `Total: $${total.toFixed(2)} (should be $${amount.toFixed(2)})`;
+                        warning.style.display = 'block';
+                    } else {
+                        warning.style.display = 'none';
+                    }
+                }
+            }
+        }
+
+        function selectAllParticipants() {
+            const checks = document.querySelectorAll('.participant-check');
+            const allChecked = Array.from(checks).every(c => c.checked);
+            
+            checks.forEach(check => {
+                check.checked = !allChecked;
+            });
+            
+            updateParticipantSplit();
         }
 
         function addExpense() {
@@ -325,17 +465,60 @@
             const payer = document.getElementById('expPayer').value;
             const checks = document.querySelectorAll('.participant-check:checked');
             const participants = Array.from(checks).map(c => c.value);
+            const splitType = document.getElementById('splitType').value;
 
-            if (desc && amount && payer && participants.length > 0) {
-                db.ref(`groups/${state.groupId}/expenses`).push().set({
-                    description: desc,
-                    amount: amount,
-                    payerId: payer,
-                    participantIds: participants,
-                    date: Date.now()
-                });
-                state.showAddExpense = false;
+            if (!desc || !amount || !payer || participants.length === 0) {
+                alert('Please fill in all fields and select at least one participant');
+                return;
             }
+
+            // Build splits object based on type
+            const splits = {};
+            
+            if (splitType === 'equal') {
+                const equalAmount = amount / participants.length;
+                participants.forEach(id => {
+                    splits[id] = equalAmount;
+                });
+            } else if (splitType === 'percentage') {
+                let totalPct = 0;
+                participants.forEach(id => {
+                    const input = document.getElementById('split-' + id);
+                    const pct = parseFloat(input.value || 0);
+                    totalPct += pct;
+                    splits[id] = (amount * pct) / 100;
+                });
+                
+                if (Math.abs(totalPct - 100) > 0.01) {
+                    alert('Percentages must add up to 100%');
+                    return;
+                }
+            } else if (splitType === 'custom') {
+                let totalCustom = 0;
+                participants.forEach(id => {
+                    const input = document.getElementById('split-' + id);
+                    const customAmt = parseFloat(input.value || 0);
+                    totalCustom += customAmt;
+                    splits[id] = customAmt;
+                });
+                
+                if (Math.abs(totalCustom - amount) > 0.01) {
+                    alert(`Custom amounts must add up to $${amount.toFixed(2)}`);
+                    return;
+                }
+            }
+
+            db.ref(`groups/${state.groupId}/expenses`).push().set({
+                description: desc,
+                amount: amount,
+                payerId: payer,
+                participantIds: participants,
+                splits: splits,
+                splitType: splitType,
+                date: Date.now()
+            });
+            
+            state.showAddExpense = false;
         }
 
         function removeExpense(id) {
@@ -352,11 +535,22 @@
             const balances = {};
             state.friends.forEach(f => balances[f.id] = 0);
             state.expenses.forEach(exp => {
-                const share = exp.amount / exp.participantIds.length;
+                // Payer gets credited the full amount
                 balances[exp.payerId] = (balances[exp.payerId] || 0) + exp.amount;
-                exp.participantIds.forEach(id => {
-                    balances[id] = (balances[id] || 0) - share;
-                });
+                
+                // Each participant pays their share
+                if (exp.splits) {
+                    // Use custom splits if available
+                    exp.participantIds.forEach(id => {
+                        balances[id] = (balances[id] || 0) - (exp.splits[id] || 0);
+                    });
+                } else {
+                    // Fallback to equal split for old expenses
+                    const share = exp.amount / exp.participantIds.length;
+                    exp.participantIds.forEach(id => {
+                        balances[id] = (balances[id] || 0) - share;
+                    });
+                }
             });
             return balances;
         }
@@ -398,6 +592,10 @@
         } else {
             render();
         }
+        }
+
+        // Start when Firebase is ready
+        initWhenReady();
     </script>
 </body>
 </html>
