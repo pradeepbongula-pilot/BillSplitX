@@ -138,6 +138,42 @@
                             </div>
                         </div>
 
+                        <!-- Summary Statistics -->
+                        <div class="bg-gradient-to-r from-indigo-50 to-blue-50 rounded-lg shadow-lg p-6 mb-6 border border-indigo-200">
+                            <h2 class="text-xl font-semibold mb-4 text-indigo-900">📊 Trip Summary</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                <div class="bg-white rounded-lg p-4">
+                                    <p class="text-sm text-gray-600">Total Trip Cost</p>
+                                    <p class="text-2xl font-bold text-indigo-600">$${state.expenses.reduce((sum, e) => sum + e.amount, 0).toFixed(2)}</p>
+                                </div>
+                                <div class="bg-white rounded-lg p-4">
+                                    <p class="text-sm text-gray-600">Average Per Person</p>
+                                    <p class="text-2xl font-bold text-green-600">$${state.friends.length > 0 ? (state.expenses.reduce((sum, e) => sum + e.amount, 0) / state.friends.length).toFixed(2) : '0.00'}</p>
+                                </div>
+                                <div class="bg-white rounded-lg p-4">
+                                    <p class="text-sm text-gray-600">Number of Expenses</p>
+                                    <p class="text-2xl font-bold text-blue-600">${state.expenses.length}</p>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-white rounded-lg p-4">
+                                <p class="text-sm font-semibold text-gray-800 mb-3">💰 How Much Each Person Spent:</p>
+                                <div class="space-y-2">
+                                    ${state.friends.map(f => {
+                                        const totalSpent = state.expenses
+                                            .filter(exp => exp.payerId === f.id)
+                                            .reduce((sum, exp) => sum + exp.amount, 0);
+                                        return `
+                                            <div class="flex justify-between items-center p-2 bg-gray-50 rounded">
+                                                <span class="font-medium">${f.name}</span>
+                                                <span class="font-bold text-indigo-600">$${totalSpent.toFixed(2)}</span>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- Friends -->
                         <div class="bg-white rounded-lg shadow-lg p-6 mb-6">
                             <div class="flex justify-between mb-4">
